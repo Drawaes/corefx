@@ -17,6 +17,13 @@ namespace System.Net.Security
             // Stops build error from never assigning to these values
             _context = new SecureChannel();
             _exception = null;
+            _nestedWrite = 0;
+            _internalOffset = 0;
+            _internalBuffer = new byte[0];
+            _internalBufferCount = 0;
+            if(_internalOffset == 0 && _internalBufferCount == 0 && _internalBuffer.Length == 0 && _nestedWrite == 0)
+            {
+            }
         }
 
         private void CheckThrow(bool authSuccessCheck, bool shutdownCheck = false)
@@ -26,6 +33,10 @@ namespace System.Net.Security
         private SecureChannel Context => default;
 
         internal Stream InternalInnerStream => default;
+
+        private void ReturnReadBufferIfEmpty()
+        {
+        }
 
         public bool IsShutdown { get; internal set; }
 

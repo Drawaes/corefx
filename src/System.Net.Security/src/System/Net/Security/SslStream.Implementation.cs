@@ -66,18 +66,6 @@ namespace System.Net.Security
         private const int FrameOverhead = 32;
         private const int ReadBufferSize = 4096 * 4 + FrameOverhead;         // We read in 16K chunks + headers.
 
-        private int _nestedWrite;
-        private int _nestedRead;
-
-        // Never updated directly, special properties are used.  This is the read buffer.
-        private byte[] _internalBuffer;
-
-        private int _internalOffset;
-        private int _internalBufferCount;
-
-        private int _decryptedBytesOffset;
-        private int _decryptedBytesCount;
-
         /// <summary>Set as the _exception when the instance is disposed.</summary>
         private static readonly ExceptionDispatchInfo s_disposedSentinel = ExceptionDispatchInfo.Capture(new ObjectDisposedException(nameof(SslStream)));
 
@@ -1600,14 +1588,6 @@ namespace System.Net.Security
             return TaskToApm.Begin(InnerStream.WriteAsync(message.Payload, 0, message.Payload.Length), asyncCallback, asyncState);
         }
 
-        private void EndShutdownInternal(IAsyncResult result)
-        {
-            CheckThrow(authSuccessCheck: true, shutdownCheck: true);
-
-            TaskToApm.End(result);
-            _shutdown = true;
-        }
-
         private int ReadInternal(byte[] buffer, int offset, int count)
         {
             ValidateParameters(buffer, offset, count);
@@ -1615,55 +1595,10 @@ namespace System.Net.Security
             return ReadAsyncInternal(reader, new Memory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
         }
 
-        private int ReadByteInternal()
-        {
-            if (Interlocked.Exchange(ref _nestedRead, 1) == 1)
-            {
-                throw new NotSupportedException(SR.Format(SR.net_io_invalidnestedcall, "ReadByte", "read"));
-            }
-
-            // If there's any data in the buffer, take one byte, and we're done.
-            try
-            {
-                if (_decryptedBytesCount > 0)
-                {
-                    int b = _internalBuffer[_decryptedBytesOffset++];
-                    _decryptedBytesCount--;
-                    ReturnReadBufferIfEmpty();
-                    return b;
-                }
-            }
-            finally
-            {
-                // Regardless of whether we were able to read a byte from the buffer,
-                // reset the read tracking.  If we weren't able to read a byte, the
-                // subsequent call to Read will set the flag again.
-                _nestedRead = 0;
-            }
-
-            // Otherwise, fall back to reading a byte via Read, the same way Stream.ReadByte does.
-            // This allocation is unfortunate but should be relatively rare, as it'll only occur once
-            // per buffer fill internally by Read.
-            byte[] oneByte = new byte[1];
-            int bytesRead = Read(oneByte, 0, 1);
-            Debug.Assert(bytesRead == 0 || bytesRead == 1);
-            return bytesRead == 1 ? oneByte[0] : -1;
-        }
-
         private IAsyncResult BeginReadInternal(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState)
         {
             return TaskToApm.Begin(ReadAsync(buffer, offset, count, CancellationToken.None), asyncCallback, asyncState);
         }
-
-        private void WriteInternal(byte[] buffer, int offset, int count)
-        {
-            ValidateParameters(buffer, offset, count);
-
-            SslWriteSync writeAdapter = new SslWriteSync(this);
-            WriteAsyncInternal(writeAdapter, new ReadOnlyMemory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
-        }
-
-        private int EndReadInternal(IAsyncResult asyncResult) => TaskToApm.End<int>(asyncResult);
 
         private IAsyncResult BeginWriteInternal(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState)
         {

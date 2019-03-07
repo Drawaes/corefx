@@ -55,6 +55,9 @@
     <Compile Include="$(CommonPath)\System\Net\SecurityProtocol.cs">
       <Link>ProductionCode\Common\System\Net\SecurityProtocol.cs</Link>
     </Compile>
+    <Compile Include="$(CommonPath)\CoreLib\System\Threading\Tasks\TaskToApm.cs">
+      <Link>ProductionCode\Common\CoreLib\System\Threading\Tasks\TaskToApm.cs</Link>
+    </Compile>
     <Compile Include="..\..\src\System\Net\Security\TlsAlertType.cs">
       <Link>ProductionCode\Common\System\Net\TlsAlertType.cs</Link>
     </Compile>

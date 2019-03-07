@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Security.Authentication;
@@ -48,6 +49,18 @@ namespace System.Net.Security
         private RemoteCertValidationCallback _certValidationDelegate;
         private LocalCertSelectionCallback _certSelectionDelegate;
         private EncryptionPolicy _encryptionPolicy;
+
+        private int _nestedWrite;
+        private int _nestedRead;
+
+        private int _decryptedBytesOffset;
+        private int _decryptedBytesCount;
+
+        // Never updated directly, special properties are used.  This is the read buffer.
+        private byte[] _internalBuffer;
+
+        private int _internalOffset;
+        private int _internalBufferCount;
 
         private ExceptionDispatchInfo _exception;
 
@@ -260,7 +273,12 @@ namespace System.Net.Security
 
         internal virtual IAsyncResult BeginShutdown(AsyncCallback asyncCallback, object asyncState) => BeginShutdownInternal(asyncCallback, asyncState);
 
-        internal virtual void EndShutdown(IAsyncResult asyncResult) => EndShutdownInternal(asyncResult);
+        internal virtual void EndShutdown(IAsyncResult asyncResult)
+        {
+            CheckThrow(authSuccessCheck: true, shutdownCheck: true);
+            TaskToApm.End(asyncResult);
+            _shutdown = true;
+        }
 
         public TransportContext TransportContext => new SslStreamContext(this);
 
@@ -656,17 +674,57 @@ namespace System.Net.Security
             }
         }
 
-        public override int ReadByte() => ReadByteInternal();
+        public override int ReadByte()
+        {
+            if (Interlocked.Exchange(ref _nestedRead, 1) == 1)
+            {
+                throw new NotSupportedException(SR.Format(SR.net_io_invalidnestedcall, "ReadByte", "read"));
+            }
+
+            // If there's any data in the buffer, take one byte, and we're done.
+            try
+            {
+                if (_decryptedBytesCount > 0)
+                {
+                    int b = _internalBuffer[_decryptedBytesOffset++];
+                    _decryptedBytesCount--;
+                    ReturnReadBufferIfEmpty();
+                    return b;
+                }
+            }
+            finally
+            {
+                // Regardless of whether we were able to read a byte from the buffer,
+                // reset the read tracking.  If we weren't able to read a byte, the
+                // subsequent call to Read will set the flag again.
+                _nestedRead = 0;
+            }
+
+            // Otherwise, fall back to reading a byte via Read, the same way Stream.ReadByte does.
+            // This allocation is unfortunate but should be relatively rare, as it'll only occur once
+            // per buffer fill internally by Read.
+            byte[] oneByte = new byte[1];
+            int bytesRead = Read(oneByte, 0, 1);
+            Debug.Assert(bytesRead == 0 || bytesRead == 1);
+            return bytesRead == 1 ? oneByte[0] : -1;
+        }
 
         public override int Read(byte[] buffer, int offset, int count) => ReadInternal(buffer, offset, count);
 
-        public void Write(byte[] buffer) => WriteInternal(buffer, 0, buffer.Length);
+        public void Write(byte[] buffer) => Write(buffer, 0, buffer.Length);
 
-        public override void Write(byte[] buffer, int offset, int count) => WriteInternal(buffer, offset, count);
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            CheckThrow(true);
+            ValidateParameters(buffer, offset, count);
+
+            SslWriteSync writeAdapter = new SslWriteSync(this);
+            WriteAsyncInternal(writeAdapter, new ReadOnlyMemory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
+        }
 
         public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => BeginReadInternal(buffer, offset, count, asyncCallback, asyncState);
 
-        public override int EndRead(IAsyncResult asyncResult) => EndReadInternal(asyncResult);
+        public override int EndRead(IAsyncResult asyncResult) => TaskToApm.End<int>(asyncResult);
 
         public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => BeginWriteInternal(buffer, offset, count, asyncCallback, asyncState);
 
@@ -678,7 +736,6 @@ namespace System.Net.Security
 
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
-            CheckThrow(true);
             ValidateParameters(buffer, offset, count);
             return WriteAsync(new ReadOnlyMemory<byte>(buffer, offset, count), cancellationToken).AsTask();
         }
