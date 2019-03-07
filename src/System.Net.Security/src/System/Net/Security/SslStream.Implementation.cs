@@ -85,7 +85,7 @@ namespace System.Net.Security
             }
         }
 
-        internal void ValidateCreateContext(SslClientAuthenticationOptions sslClientAuthenticationOptions, RemoteCertValidationCallback remoteCallback, LocalCertSelectionCallback localCallback)
+        private void ValidateCreateContext(SslClientAuthenticationOptions sslClientAuthenticationOptions, RemoteCertValidationCallback remoteCallback, LocalCertSelectionCallback localCallback)
         {
             ThrowIfExceptional();
 
@@ -120,7 +120,7 @@ namespace System.Net.Security
             }
         }
 
-        internal void ValidateCreateContext(SslAuthenticationOptions sslAuthenticationOptions)
+        private void ValidateCreateContext(SslAuthenticationOptions sslAuthenticationOptions)
         {
             ThrowIfExceptional();
 
@@ -225,7 +225,7 @@ namespace System.Net.Security
         //
         // This is to not depend on GC&SafeHandle class if the context is not needed anymore.
         //
-        internal void CloseInternal()
+        private void CloseInternal()
         {
             _exception = s_disposedSentinel;
             Context?.Close();
@@ -279,7 +279,7 @@ namespace System.Net.Security
         //
         // Must be called under the lock in case concurrent handshake is going.
         //
-        internal int CheckOldKeyDecryptedData(Memory<byte> buffer)
+        private int CheckOldKeyDecryptedData(Memory<byte> buffer)
         {
             CheckThrow(true);
             if (_queuedReadData != null)
@@ -305,7 +305,7 @@ namespace System.Net.Security
         // This method assumes that a SSPI context is already in a good shape.
         // For example it is either a fresh context or already authenticated context that needs renegotiation.
         //
-        internal void ProcessAuthentication(LazyAsyncResult lazyResult)
+        private void ProcessAuthentication(LazyAsyncResult lazyResult)
         {
             if (Interlocked.Exchange(ref _nestedAuth, 1) == 1)
             {
@@ -443,7 +443,7 @@ namespace System.Net.Security
             }
         }
 
-        internal void EndProcessAuthentication(IAsyncResult result)
+        private void EndProcessAuthentication(IAsyncResult result)
         {
             if (result == null)
             {
@@ -478,7 +478,7 @@ namespace System.Net.Security
             }
         }
 
-        internal void InternalEndProcessAuthentication(LazyAsyncResult lazyResult)
+        private void InternalEndProcessAuthentication(LazyAsyncResult lazyResult)
         {
             // No "artificial" timeouts implemented so far, InnerStream controls that.
             lazyResult.InternalWaitForCompletion();
@@ -1593,7 +1593,7 @@ namespace System.Net.Security
             }
         }
 
-        internal IAsyncResult BeginShutdownInternal(AsyncCallback asyncCallback, object asyncState)
+        private IAsyncResult BeginShutdownInternal(AsyncCallback asyncCallback, object asyncState)
         {
             CheckThrow(authSuccessCheck: true, shutdownCheck: true);
 
@@ -1601,7 +1601,7 @@ namespace System.Net.Security
             return TaskToApm.Begin(InnerStream.WriteAsync(message.Payload, 0, message.Payload.Length), asyncCallback, asyncState);
         }
 
-        internal void EndShutdownInternal(IAsyncResult result)
+        private void EndShutdownInternal(IAsyncResult result)
         {
             CheckThrow(authSuccessCheck: true, shutdownCheck: true);
 
