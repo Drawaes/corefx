@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 namespace System.Net.Security
 {
     // This contains adapters to allow a single code path for sync/async logic
-    internal partial class SslStreamInternal
+    public partial class SslStream
     {
         private interface ISslWriteAdapter
         {

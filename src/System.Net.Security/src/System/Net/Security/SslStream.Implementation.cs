@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -22,15 +23,15 @@ namespace System.Net.Security
         private static AsyncProtocolCallback s_readFrameCallback = new AsyncProtocolCallback(ReadFrameCallback);
         private static AsyncCallback s_writeCallback = new AsyncCallback(WriteCallback);
 
-        internal SslAuthenticationOptions _sslAuthenticationOptions;
-        
+        private SslAuthenticationOptions _sslAuthenticationOptions;
+
         private int _nestedAuth;
         private SecureChannel _context;
 
         private bool _handshakeCompleted;
-        
+
         private SecurityStatusPal _securityStatus;
-        
+
         private enum CachedSessionStatus : byte
         {
             Unknown = 0,
@@ -61,6 +62,21 @@ namespace System.Net.Security
 
         private int _lockReadState;
         private object _queuedReadStateRequest;
+
+        private const int FrameOverhead = 32;
+        private const int ReadBufferSize = 4096 * 4 + FrameOverhead;         // We read in 16K chunks + headers.
+
+        private int _nestedWrite;
+        private int _nestedRead;
+
+        // Never updated directly, special properties are used.  This is the read buffer.
+        private byte[] _internalBuffer;
+
+        private int _internalOffset;
+        private int _internalBufferCount;
+
+        private int _decryptedBytesOffset;
+        private int _decryptedBytesCount;
 
         /// <summary>Set as the _exception when the instance is disposed.</summary>
         private static readonly ExceptionDispatchInfo s_disposedSentinel = ExceptionDispatchInfo.Capture(new ObjectDisposedException(nameof(SslStream)));
@@ -146,7 +162,7 @@ namespace System.Net.Security
             }
         }
 
-        internal bool RemoteCertRequired
+        private bool RemoteCertRequired
         {
             get
             {
@@ -154,7 +170,7 @@ namespace System.Net.Security
             }
         }
 
-        internal Stream InternalInnerStream
+        private Stream InternalInnerStream
         {
             get
             {
@@ -162,7 +178,7 @@ namespace System.Net.Security
             }
         }
 
-        internal int MaxDataSize
+        private int MaxDataSize
         {
             get
             {
@@ -189,8 +205,8 @@ namespace System.Net.Security
                 return _handshakeCompleted;
             }
         }
-                
-        internal void CheckThrow(bool authSuccessCheck, bool shutdownCheck = false)
+
+        private void CheckThrow(bool authSuccessCheck, bool shutdownCheck = false)
         {
             ThrowIfExceptional();
 
@@ -212,16 +228,16 @@ namespace System.Net.Security
         {
             _exception = s_disposedSentinel;
             _context?.Close();
-            _secureStream?.Dispose();
+            DisposeInternal();
         }
 
-        internal SecurityStatusPal EncryptData(ReadOnlyMemory<byte> buffer, ref byte[] outBuffer, out int outSize)
+        private SecurityStatusPal EncryptData(ReadOnlyMemory<byte> buffer, ref byte[] outBuffer, out int outSize)
         {
             CheckThrow(true);
             return _context.Encrypt(buffer, ref outBuffer, out outSize);
         }
 
-        internal SecurityStatusPal DecryptData(byte[] buffer, ref int offset, ref int count)
+        private SecurityStatusPal DecryptData(byte[] buffer, ref int offset, ref int count)
         {
             CheckThrow(true);
             return PrivateDecryptData(buffer, ref offset, ref count);
@@ -347,7 +363,7 @@ namespace System.Net.Security
         //
         // This is used to reply on re-handshake when received SEC_I_RENEGOTIATE on Read().
         //
-        internal void ReplyOnReAuthentication(byte[] buffer)
+        private void ReplyOnReAuthentication(byte[] buffer)
         {
             lock (SyncObject)
             {
@@ -931,7 +947,7 @@ namespace System.Net.Security
         // -1    - proceed
         // 0     - queued
         // X     - some bytes are ready, no need for IO
-        internal int CheckEnqueueRead(Memory<byte> buffer)
+        private int CheckEnqueueRead(Memory<byte> buffer)
         {
             int lockState = Interlocked.CompareExchange(ref _lockReadState, LockRead, LockNone);
 
@@ -971,7 +987,7 @@ namespace System.Net.Security
             }
         }
 
-        internal ValueTask<int> CheckEnqueueReadAsync(Memory<byte> buffer)
+        private ValueTask<int> CheckEnqueueReadAsync(Memory<byte> buffer)
         {
             int lockState = Interlocked.CompareExchange(ref _lockReadState, LockRead, LockNone);
 
@@ -1004,7 +1020,7 @@ namespace System.Net.Security
             }
         }
 
-        internal void FinishRead(byte[] renegotiateBuffer)
+        private void FinishRead(byte[] renegotiateBuffer)
         {
             int lockState = Interlocked.CompareExchange(ref _lockReadState, LockNone, LockRead);
 
@@ -1031,7 +1047,7 @@ namespace System.Net.Security
             }
         }
 
-        internal Task CheckEnqueueWriteAsync()
+        private Task CheckEnqueueWriteAsync()
         {
             // Clear previous request.
             int lockState = Interlocked.CompareExchange(ref _lockWriteState, LockWrite, LockNone);
@@ -1055,7 +1071,7 @@ namespace System.Net.Security
             }
         }
 
-        internal void CheckEnqueueWrite()
+        private void CheckEnqueueWrite()
         {
             // Clear previous request.
             _queuedWriteStateRequest = null;
@@ -1429,7 +1445,7 @@ namespace System.Net.Security
 
         //
         // This is called from SslStream class too.
-        internal int GetRemainingFrameSize(byte[] buffer, int offset, int dataSize)
+        private int GetRemainingFrameSize(byte[] buffer, int offset, int dataSize)
         {
             if (NetEventSource.IsEnabled)
                 NetEventSource.Enter(this, buffer, offset, dataSize);
@@ -1591,5 +1607,478 @@ namespace System.Net.Security
             TaskToApm.End(result);
             _shutdown = true;
         }
+
+        private int ReadInternal(byte[] buffer, int offset, int count)
+        {
+            ValidateParameters(buffer, offset, count);
+            SslReadSync reader = new SslReadSync(this);
+            return ReadAsyncInternal(reader, new Memory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
+        }
+
+        private int ReadByteInternal()
+        {
+            if (Interlocked.Exchange(ref _nestedRead, 1) == 1)
+            {
+                throw new NotSupportedException(SR.Format(SR.net_io_invalidnestedcall, "ReadByte", "read"));
+            }
+
+            // If there's any data in the buffer, take one byte, and we're done.
+            try
+            {
+                if (_decryptedBytesCount > 0)
+                {
+                    int b = _internalBuffer[_decryptedBytesOffset++];
+                    _decryptedBytesCount--;
+                    ReturnReadBufferIfEmpty();
+                    return b;
+                }
+            }
+            finally
+            {
+                // Regardless of whether we were able to read a byte from the buffer,
+                // reset the read tracking.  If we weren't able to read a byte, the
+                // subsequent call to Read will set the flag again.
+                _nestedRead = 0;
+            }
+
+            // Otherwise, fall back to reading a byte via Read, the same way Stream.ReadByte does.
+            // This allocation is unfortunate but should be relatively rare, as it'll only occur once
+            // per buffer fill internally by Read.
+            byte[] oneByte = new byte[1];
+            int bytesRead = Read(oneByte, 0, 1);
+            Debug.Assert(bytesRead == 0 || bytesRead == 1);
+            return bytesRead == 1 ? oneByte[0] : -1;
+        }
+
+        private IAsyncResult BeginReadInternal(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState)
+        {
+            return TaskToApm.Begin(ReadAsync(buffer, offset, count, CancellationToken.None), asyncCallback, asyncState);
+        }
+
+        private void WriteInternal(byte[] buffer, int offset, int count)
+        {
+            ValidateParameters(buffer, offset, count);
+
+            SslWriteSync writeAdapter = new SslWriteSync(this);
+            WriteAsyncInternal(writeAdapter, new ReadOnlyMemory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
+        }
+
+        private int EndReadInternal(IAsyncResult asyncResult) => TaskToApm.End<int>(asyncResult);
+
+        private IAsyncResult BeginWriteInternal(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState)
+        {
+            return TaskToApm.Begin(WriteAsync(buffer, offset, count, CancellationToken.None), asyncCallback, asyncState);
+        }
+
+        private async ValueTask<int> ReadAsyncInternal<TReadAdapter>(TReadAdapter adapter, Memory<byte> buffer)
+            where TReadAdapter : ISslReadAdapter
+        {
+            if (Interlocked.Exchange(ref _nestedRead, 1) == 1)
+            {
+                throw new NotSupportedException(SR.Format(SR.net_io_invalidnestedcall, nameof(ReadAsync), "read"));
+            }
+
+            try
+            {
+                while (true)
+                {
+                    int copyBytes;
+                    if (_decryptedBytesCount != 0)
+                    {
+                        copyBytes = CopyDecryptedData(buffer);
+
+                        FinishRead(null);
+
+                        return copyBytes;
+                    }
+
+                    copyBytes = await adapter.LockAsync(buffer).ConfigureAwait(false);
+                    if (copyBytes > 0)
+                    {
+                        return copyBytes;
+                    }
+
+                    ResetReadBuffer();
+                    int readBytes = await FillBufferAsync(adapter, SecureChannel.ReadHeaderSize).ConfigureAwait(false);
+                    if (readBytes == 0)
+                    {
+                        return 0;
+                    }
+
+                    int payloadBytes = GetRemainingFrameSize(_internalBuffer, _internalOffset, readBytes);
+                    if (payloadBytes < 0)
+                    {
+                        throw new IOException(SR.net_frame_read_size);
+                    }
+
+                    readBytes = await FillBufferAsync(adapter, SecureChannel.ReadHeaderSize + payloadBytes).ConfigureAwait(false);
+                    Debug.Assert(readBytes >= 0);
+                    if (readBytes == 0)
+                    {
+                        throw new IOException(SR.net_io_eof);
+                    }
+
+                    // At this point, readBytes contains the size of the header plus body.
+                    // Set _decrytpedBytesOffset/Count to the current frame we have (including header)
+                    // DecryptData will decrypt in-place and modify these to point to the actual decrypted data, which may be smaller.
+                    _decryptedBytesOffset = _internalOffset;
+                    _decryptedBytesCount = readBytes;
+                    SecurityStatusPal status = DecryptData(_internalBuffer, ref _decryptedBytesOffset, ref _decryptedBytesCount);
+
+                    // Treat the bytes we just decrypted as consumed
+                    // Note, we won't do another buffer read until the decrypted bytes are processed
+                    ConsumeBufferedBytes(readBytes);
+
+                    if (status.ErrorCode != SecurityStatusPalErrorCode.OK)
+                    {
+                        byte[] extraBuffer = null;
+                        if (_decryptedBytesCount != 0)
+                        {
+                            extraBuffer = new byte[_decryptedBytesCount];
+                            Buffer.BlockCopy(_internalBuffer, _decryptedBytesOffset, extraBuffer, 0, _decryptedBytesCount);
+
+                            _decryptedBytesCount = 0;
+                        }
+
+                        ProtocolToken message = new ProtocolToken(null, status);
+                        if (NetEventSource.IsEnabled)
+                            NetEventSource.Info(null, $"***Processing an error Status = {message.Status}");
+
+                        if (message.Renegotiate)
+                        {
+                            if (!_sslAuthenticationOptions.AllowRenegotiation)
+                            {
+                                throw new IOException(SR.net_ssl_io_renego);
+                            }
+
+                            ReplyOnReAuthentication(extraBuffer);
+
+                            // Loop on read.
+                            continue;
+                        }
+
+                        if (message.CloseConnection)
+                        {
+                            FinishRead(null);
+                            return 0;
+                        }
+
+                        throw new IOException(SR.net_io_decrypt, message.GetException());
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                FinishRead(null);
+
+                if (e is IOException)
+                {
+                    throw;
+                }
+
+                throw new IOException(SR.net_io_read, e);
+            }
+            finally
+            {
+                _nestedRead = 0;
+            }
+        }
+
+        private void ResetReadBuffer()
+        {
+            Debug.Assert(_decryptedBytesCount == 0);
+
+            if (_internalBuffer == null)
+            {
+                _internalBuffer = ArrayPool<byte>.Shared.Rent(ReadBufferSize);
+            }
+            else if (_internalOffset > 0)
+            {
+                // We have buffered data at a non-zero offset.
+                // To maximize the buffer space available for the next read,
+                // copy the existing data down to the beginning of the buffer.
+                Buffer.BlockCopy(_internalBuffer, _internalOffset, _internalBuffer, 0, _internalBufferCount);
+                _internalOffset = 0;
+            }
+        }
+
+        private ValueTask<int> FillBufferAsync<TReadAdapter>(TReadAdapter adapter, int minSize)
+            where TReadAdapter : ISslReadAdapter
+        {
+            if (_internalBufferCount >= minSize)
+            {
+                return new ValueTask<int>(minSize);
+            }
+
+            int initialCount = _internalBufferCount;
+            do
+            {
+                ValueTask<int> t = adapter.ReadAsync(_internalBuffer, _internalBufferCount, _internalBuffer.Length - _internalBufferCount);
+                if (!t.IsCompletedSuccessfully)
+                {
+                    return InternalFillBufferAsync(adapter, t, minSize, initialCount);
+                }
+                int bytes = t.Result;
+                if (bytes == 0)
+                {
+                    if (_internalBufferCount != initialCount)
+                    {
+                        // We read some bytes, but not as many as we expected, so throw.
+                        throw new IOException(SR.net_io_eof);
+                    }
+
+                    return new ValueTask<int>(0);
+                }
+
+                _internalBufferCount += bytes;
+            } while (_internalBufferCount < minSize);
+
+            return new ValueTask<int>(minSize);
+
+            async ValueTask<int> InternalFillBufferAsync(TReadAdapter adap, ValueTask<int> task, int min, int initial)
+            {
+                while (true)
+                {
+                    int b = await task.ConfigureAwait(false);
+                    if (b == 0)
+                    {
+                        if (_internalBufferCount != initial)
+                        {
+                            throw new IOException(SR.net_io_eof);
+                        }
+
+                        return 0;
+                    }
+
+                    _internalBufferCount += b;
+                    if (_internalBufferCount >= min)
+                    {
+                        return min;
+                    }
+
+                    task = adap.ReadAsync(_internalBuffer, _internalBufferCount, _internalBuffer.Length - _internalBufferCount);
+                }
+            }
+        }
+
+        private async Task WriteAsyncChunked<TWriteAdapter>(TWriteAdapter writeAdapter, ReadOnlyMemory<byte> buffer)
+            where TWriteAdapter : struct, ISslWriteAdapter
+        {
+            do
+            {
+                int chunkBytes = Math.Min(buffer.Length, MaxDataSize);
+                await WriteSingleChunk(writeAdapter, buffer.Slice(0, chunkBytes)).ConfigureAwait(false);
+                buffer = buffer.Slice(chunkBytes);
+
+            } while (buffer.Length != 0);
+        }
+
+        //We will only free the read buffer if it
+        //actually contains no decrypted or encrypted bytes
+        private void ReturnReadBufferIfEmpty()
+        {
+            if (_internalBuffer != null && _decryptedBytesCount == 0 && _internalBufferCount == 0)
+            {
+                ArrayPool<byte>.Shared.Return(_internalBuffer);
+                _internalBuffer = null;
+                _internalBufferCount = 0;
+                _internalOffset = 0;
+                _decryptedBytesCount = 0;
+                _decryptedBytesOffset = 0;
+            }
+        }
+
+        private void ConsumeBufferedBytes(int byteCount)
+        {
+            Debug.Assert(byteCount >= 0);
+            Debug.Assert(byteCount <= _internalBufferCount);
+
+            _internalOffset += byteCount;
+            _internalBufferCount -= byteCount;
+
+            ReturnReadBufferIfEmpty();
+        }
+
+        private int CopyDecryptedData(Memory<byte> buffer)
+        {
+            Debug.Assert(_decryptedBytesCount > 0);
+
+            int copyBytes = Math.Min(_decryptedBytesCount, buffer.Length);
+            if (copyBytes != 0)
+            {
+                new Span<byte>(_internalBuffer, _decryptedBytesOffset, copyBytes).CopyTo(buffer.Span);
+
+                _decryptedBytesOffset += copyBytes;
+                _decryptedBytesCount -= copyBytes;
+            }
+            ReturnReadBufferIfEmpty();
+            return copyBytes;
+        }
+
+        private ValueTask WriteAsyncInternal<TWriteAdapter>(TWriteAdapter writeAdapter, ReadOnlyMemory<byte> buffer)
+            where TWriteAdapter : struct, ISslWriteAdapter
+        {
+            CheckThrow(authSuccessCheck: true, shutdownCheck: true);
+
+            if (buffer.Length == 0 && !SslStreamPal.CanEncryptEmptyMessage)
+            {
+                // If it's an empty message and the PAL doesn't support that, we're done.
+                return default;
+            }
+
+            if (Interlocked.Exchange(ref _nestedWrite, 1) == 1)
+            {
+                throw new NotSupportedException(SR.Format(SR.net_io_invalidnestedcall, nameof(WriteAsync), "write"));
+            }
+
+            ValueTask t = buffer.Length < MaxDataSize ?
+                    WriteSingleChunk(writeAdapter, buffer) :
+                    new ValueTask(WriteAsyncChunked(writeAdapter, buffer));
+
+            if (t.IsCompletedSuccessfully)
+            {
+                _nestedWrite = 0;
+                return t;
+            }
+            return new ValueTask(ExitWriteAsync(t));
+
+            async Task ExitWriteAsync(ValueTask task)
+            {
+                try
+                {
+                    await task.ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    FinishWrite();
+
+                    if (e is IOException)
+                    {
+                        throw;
+                    }
+
+                    throw new IOException(SR.net_io_write, e);
+                }
+                finally
+                {
+                    _nestedWrite = 0;
+                }
+            }
+        }
+
+        private ValueTask WriteSingleChunk<TWriteAdapter>(TWriteAdapter writeAdapter, ReadOnlyMemory<byte> buffer)
+            where TWriteAdapter : struct, ISslWriteAdapter
+        {
+            // Request a write IO slot.
+            Task ioSlot = writeAdapter.LockAsync();
+            if (!ioSlot.IsCompletedSuccessfully)
+            {
+                // Operation is async and has been queued, return.
+                return new ValueTask(WaitForWriteIOSlot(writeAdapter, ioSlot, buffer));
+            }
+
+            byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length + FrameOverhead);
+            byte[] outBuffer = rentedBuffer;
+
+            SecurityStatusPal status = EncryptData(buffer, ref outBuffer, out int encryptedBytes);
+
+            if (status.ErrorCode != SecurityStatusPalErrorCode.OK)
+            {
+                // Re-handshake status is not supported.
+                ArrayPool<byte>.Shared.Return(rentedBuffer);
+                ProtocolToken message = new ProtocolToken(null, status);
+                return new ValueTask(Task.FromException(new IOException(SR.net_io_encrypt, message.GetException())));
+            }
+
+            ValueTask t = writeAdapter.WriteAsync(outBuffer, 0, encryptedBytes);
+            if (t.IsCompletedSuccessfully)
+            {
+                ArrayPool<byte>.Shared.Return(rentedBuffer);
+                FinishWrite();
+                return t;
+            }
+            else
+            {
+                return new ValueTask(CompleteAsync(t, rentedBuffer));
+            }
+
+            async Task WaitForWriteIOSlot(TWriteAdapter wAdapter, Task lockTask, ReadOnlyMemory<byte> buff)
+            {
+                await lockTask.ConfigureAwait(false);
+                await WriteSingleChunk(wAdapter, buff).ConfigureAwait(false);
+            }
+
+            async Task CompleteAsync(ValueTask writeTask, byte[] bufferToReturn)
+            {
+                try
+                {
+                    await writeTask.ConfigureAwait(false);
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(bufferToReturn);
+                    FinishWrite();
+                }
+            }
+        }
+
+        private void EndWriteInternal(IAsyncResult asyncResult) => TaskToApm.End(asyncResult);
+
+        //
+        // Validates user parameters for all Read/Write methods.
+        //
+        private void ValidateParameters(byte[] buffer, int offset, int count)
+        {
+            if (buffer == null)
+            {
+                throw new ArgumentNullException(nameof(buffer));
+            }
+
+            if (offset < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(offset));
+            }
+
+            if (count < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
+
+            if (count > buffer.Length - offset)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count), SR.net_offset_plus_count);
+            }
+        }
+
+        private void DisposeInternal()
+        {
+            DisposeInternal(disposing: true);
+
+            if (_internalBuffer == null)
+            {
+                // Suppress finalizer if the read buffer was returned.
+                GC.SuppressFinalize(this);
+            }
+        }
+
+        private void DisposeInternal(bool disposing)
+        {
+            // Ensure a Read operation is not in progress,
+            // block potential reads since SslStream is disposing.
+            // This leaves the _nestedRead = 1, but that's ok, since
+            // subsequent Reads first check if the context is still available.
+            if (Interlocked.CompareExchange(ref _nestedRead, 1, 0) == 0)
+            {
+                byte[] buffer = _internalBuffer;
+                if (buffer != null)
+                {
+                    _internalBuffer = null;
+                    _internalBufferCount = 0;
+                    _internalOffset = 0;
+                    ArrayPool<byte>.Shared.Return(buffer);
+                }
+            }
+        }
+
     }
 }

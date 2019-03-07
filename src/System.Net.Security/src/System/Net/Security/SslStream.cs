@@ -49,7 +49,6 @@ namespace System.Net.Security
         private LocalCertSelectionCallback _certSelectionDelegate;
         private EncryptionPolicy _encryptionPolicy;
 
-        private readonly SslStreamInternal _secureStream;
         private ExceptionDispatchInfo _exception;
 
         private bool _shutdown;
@@ -89,7 +88,6 @@ namespace System.Net.Security
             _encryptionPolicy = encryptionPolicy;
             _certValidationDelegate = new RemoteCertValidationCallback(UserCertValidationCallbackWrapper);
             _certSelectionDelegate = userCertificateSelectionCallback == null ? null : new LocalCertSelectionCallback(UserCertSelectionCallbackWrapper);
-            _secureStream = new SslStreamInternal(this);
         }
 
         public SslApplicationProtocol NegotiatedApplicationProtocol => _context?.NegotiatedApplicationProtocol ?? default;
@@ -264,14 +262,6 @@ namespace System.Net.Security
 
         internal virtual void EndShutdown(IAsyncResult asyncResult) => EndShutdownInternal(asyncResult);
 
-        private SslStreamInternal SecureStream
-        {
-            get
-            {
-                CheckThrow(true);
-                return _secureStream;
-            }
-        }
         public TransportContext TransportContext => new SslStreamContext(this);
 
         internal ChannelBinding GetChannelBinding(ChannelBindingKind kind) => _context?.GetChannelBinding(kind);
@@ -666,28 +656,53 @@ namespace System.Net.Security
             }
         }
 
-        public override int ReadByte() => SecureStream.ReadByte();
+        public override int ReadByte() => ReadByteInternal();
 
-        public override int Read(byte[] buffer, int offset, int count) => SecureStream.Read(buffer, offset, count);
+        public override int Read(byte[] buffer, int offset, int count) => ReadInternal(buffer, offset, count);
 
-        public void Write(byte[] buffer) => SecureStream.Write(buffer, 0, buffer.Length);
+        public void Write(byte[] buffer) => WriteInternal(buffer, 0, buffer.Length);
 
-        public override void Write(byte[] buffer, int offset, int count) => SecureStream.Write(buffer, offset, count);
+        public override void Write(byte[] buffer, int offset, int count) => WriteInternal(buffer, offset, count);
 
-        public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => SecureStream.BeginRead(buffer, offset, count, asyncCallback, asyncState);
+        public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => BeginReadInternal(buffer, offset, count, asyncCallback, asyncState);
 
-        public override int EndRead(IAsyncResult asyncResult) => SecureStream.EndRead(asyncResult);
+        public override int EndRead(IAsyncResult asyncResult) => EndReadInternal(asyncResult);
 
-        public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => SecureStream.BeginWrite(buffer, offset, count, asyncCallback, asyncState);
+        public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => BeginWriteInternal(buffer, offset, count, asyncCallback, asyncState);
 
-        public override void EndWrite(IAsyncResult asyncResult) => SecureStream.EndWrite(asyncResult);
+        public override void EndWrite(IAsyncResult asyncResult)
+        {
+            CheckThrow(true);
+            EndWriteInternal(asyncResult);
+        }
 
-        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => SecureStream.WriteAsync(buffer, offset, count, cancellationToken);
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            CheckThrow(true);
+            ValidateParameters(buffer, offset, count);
+            return WriteAsync(new ReadOnlyMemory<byte>(buffer, offset, count), cancellationToken).AsTask();
+        }
 
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken) => SecureStream.WriteAsync(buffer, cancellationToken);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
+        {
+            CheckThrow(true);
+            SslWriteAsync writeAdapter = new SslWriteAsync(this, cancellationToken);
+            return WriteAsyncInternal(writeAdapter, buffer);
+        }
 
-        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => SecureStream.ReadAsync(buffer, offset, count, cancellationToken);
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            CheckThrow(true);
+            ValidateParameters(buffer, offset, count);
+            SslReadAsync read = new SslReadAsync(this, cancellationToken);
+            return ReadAsyncInternal(read, new Memory<byte>(buffer, offset, count)).AsTask();
+        }
 
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => SecureStream.ReadAsync(buffer, cancellationToken);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            CheckThrow(true);
+            SslReadAsync read = new SslReadAsync(this, cancellationToken);
+            return ReadAsyncInternal(read, buffer);
+        }
     }
 }
