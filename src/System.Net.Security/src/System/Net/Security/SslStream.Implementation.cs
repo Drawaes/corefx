@@ -1,7 +1,5 @@
-// Licensed to the .NET Foundation under one or more agreements.
-// The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
-
+﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -10,23 +8,22 @@ using System.Runtime.ExceptionServices;
 using System.Security.Authentication;
 using System.Security.Authentication.ExtendedProtection;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace System.Net.Security
 {
-    internal class SslState
+    public partial class SslStream
     {
+
         private static int s_uniqueNameInteger = 123;
         private static AsyncProtocolCallback s_partialFrameCallback = new AsyncProtocolCallback(PartialFrameCallback);
         private static AsyncProtocolCallback s_readFrameCallback = new AsyncProtocolCallback(ReadFrameCallback);
         private static AsyncCallback s_writeCallback = new AsyncCallback(WriteCallback);
 
         internal SslAuthenticationOptions _sslAuthenticationOptions;
-
-        private readonly Stream _innerStream;
-        private readonly SslStreamInternal _secureStream;
-
+        
         private int _nestedAuth;
         private SecureChannel _context;
 
@@ -34,8 +31,7 @@ namespace System.Net.Security
         private bool _shutdown;
 
         private SecurityStatusPal _securityStatus;
-        private ExceptionDispatchInfo _exception;
-
+        
         private enum CachedSessionStatus : byte
         {
             Unknown = 0,
@@ -67,18 +63,10 @@ namespace System.Net.Security
         private int _lockReadState;
         private object _queuedReadStateRequest;
 
-        //
-        //  The public Client and Server classes enforce the parameters rules before
-        //  calling into this .ctor.
-        //
-        internal SslState(Stream innerStream)
-        {
-            _innerStream = innerStream;
-            _secureStream = new SslStreamInternal(this);
-        }
-
         /// <summary>Set as the _exception when the instance is disposed.</summary>
         private static readonly ExceptionDispatchInfo s_disposedSentinel = ExceptionDispatchInfo.Capture(new ObjectDisposedException(nameof(SslStream)));
+
+        private SecureChannel SyncObject => _context;
 
         private void ThrowIfExceptional()
         {
@@ -159,82 +147,11 @@ namespace System.Net.Security
             }
         }
 
-        internal SslApplicationProtocol NegotiatedApplicationProtocol
-        {
-            get
-            {
-                if (Context == null)
-                    return default;
-
-                return Context.NegotiatedApplicationProtocol;
-            }
-        }
-
-        internal bool IsAuthenticated
-        {
-            get
-            {
-                return _context != null && _context.IsValidContext && _exception == null && HandshakeCompleted;
-            }
-        }
-
-        internal bool IsMutuallyAuthenticated
-        {
-            get
-            {
-                return
-                    IsAuthenticated &&
-                    (Context.IsServer ? Context.LocalServerCertificate : Context.LocalClientCertificate) != null &&
-                    Context.IsRemoteCertificateAvailable; /* does not work: Context.IsMutualAuthFlag;*/
-            }
-        }
-
         internal bool RemoteCertRequired
         {
             get
             {
                 return Context == null || Context.RemoteCertRequired;
-            }
-        }
-
-        internal bool IsServer
-        {
-            get
-            {
-                return Context != null && Context.IsServer;
-            }
-        }
-
-        //
-        // This will return selected local cert for both client/server streams
-        //
-        internal X509Certificate LocalCertificate
-        {
-            get
-            {
-                CheckThrow(true);
-                return InternalLocalCertificate;
-            }
-        }
-
-        private X509Certificate InternalLocalCertificate
-        {
-            get
-            {
-                return Context.IsServer ? Context.LocalServerCertificate : Context.LocalClientCertificate;
-            }
-        }
-
-        internal ChannelBinding GetChannelBinding(ChannelBindingKind kind)
-        {
-            return (Context == null) ? null : Context.GetChannelBinding(kind);
-        }
-
-        internal bool CheckCertRevocationStatus
-        {
-            get
-            {
-                return Context != null && Context.CheckCertRevocationStatus != X509RevocationMode.NoCheck;
             }
         }
 
@@ -246,159 +163,11 @@ namespace System.Net.Security
             }
         }
 
-        internal CipherAlgorithmType CipherAlgorithm
+        internal Stream InternalInnerStream
         {
             get
             {
-                CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
-                if (info == null)
-                {
-                    return CipherAlgorithmType.None;
-                }
-                return (CipherAlgorithmType)info.DataCipherAlg;
-            }
-        }
-
-        internal int CipherStrength
-        {
-            get
-            {
-                CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
-                if (info == null)
-                {
-                    return 0;
-                }
-
-                return info.DataKeySize;
-            }
-        }
-
-        internal HashAlgorithmType HashAlgorithm
-        {
-            get
-            {
-                CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
-                if (info == null)
-                {
-                    return (HashAlgorithmType)0;
-                }
-                return (HashAlgorithmType)info.DataHashAlg;
-            }
-        }
-
-        internal int HashStrength
-        {
-            get
-            {
-                CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
-                if (info == null)
-                {
-                    return 0;
-                }
-
-                return info.DataHashKeySize;
-            }
-        }
-
-        internal ExchangeAlgorithmType KeyExchangeAlgorithm
-        {
-            get
-            {
-                CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
-                if (info == null)
-                {
-                    return (ExchangeAlgorithmType)0;
-                }
-
-                return (ExchangeAlgorithmType)info.KeyExchangeAlg;
-            }
-        }
-
-        internal int KeyExchangeStrength
-        {
-            get
-            {
-                CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
-                if (info == null)
-                {
-                    return 0;
-                }
-
-                return info.KeyExchKeySize;
-            }
-        }
-
-        internal SslProtocols SslProtocol
-        {
-            get
-            {
-                CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
-                if (info == null)
-                {
-                    return SslProtocols.None;
-                }
-
-                SslProtocols proto = (SslProtocols)info.Protocol;
-                SslProtocols ret = SslProtocols.None;
-
-#pragma warning disable 0618 // Ssl2, Ssl3 are deprecated.
-                // Restore client/server bits so the result maps exactly on published constants.
-                if ((proto & SslProtocols.Ssl2) != 0)
-                {
-                    ret |= SslProtocols.Ssl2;
-                }
-
-                if ((proto & SslProtocols.Ssl3) != 0)
-                {
-                    ret |= SslProtocols.Ssl3;
-                }
-#pragma warning restore
-
-                if ((proto & SslProtocols.Tls) != 0)
-                {
-                    ret |= SslProtocols.Tls;
-                }
-
-                if ((proto & SslProtocols.Tls11) != 0)
-                {
-                    ret |= SslProtocols.Tls11;
-                }
-
-                if ((proto & SslProtocols.Tls12) != 0)
-                {
-                    ret |= SslProtocols.Tls12;
-                }
-
-                if ((proto & SslProtocols.Tls13) != 0)
-                {
-                    ret |= SslProtocols.Tls13;
-                }
-
-                return ret;
-            }
-        }
-
-        internal Stream InnerStream
-        {
-            get
-            {
-                return _innerStream;
-            }
-        }
-
-        internal SslStreamInternal SecureStream
-        {
-            get
-            {
-                CheckThrow(true);
-                return _secureStream;
+                return InnerStream;
             }
         }
 
@@ -453,20 +222,10 @@ namespace System.Net.Security
             }
         }
 
-        internal void Flush()
-        {
-            InnerStream.Flush();
-        }
-
-        internal Task FlushAsync(CancellationToken cancellationToken)
-        {
-            return InnerStream.FlushAsync(cancellationToken);
-        }
-
         //
         // This is to not depend on GC&SafeHandle class if the context is not needed anymore.
         //
-        internal void Close()
+        internal void CloseInternal()
         {
             _exception = s_disposedSentinel;
             Context?.Close();
@@ -495,7 +254,7 @@ namespace System.Net.Security
         //
         private Exception EnqueueOldKeyDecryptedData(byte[] buffer, int offset, int count)
         {
-            lock (this)
+            lock (SyncObject)
             {
                 if (_queuedReadCount + count > MaxQueuedReadBytes)
                 {
@@ -607,7 +366,7 @@ namespace System.Net.Security
         //
         internal void ReplyOnReAuthentication(byte[] buffer)
         {
-            lock (this)
+            lock (SyncObject)
             {
                 // Note we are already inside the read, so checking for already going concurrent handshake.
                 _lockReadState = LockHandshake;
@@ -670,7 +429,7 @@ namespace System.Net.Security
                 SetException(e);
                 if (_exception.SourceException != e)
                 {
-                   ThrowIfExceptional();
+                    ThrowIfExceptional();
                 }
                 throw;
             }
@@ -845,12 +604,12 @@ namespace System.Net.Security
             int readBytes = 0;
             if (asyncRequest == null)
             {
-                readBytes = FixedSizeReader.ReadPacket(_innerStream, buffer, 0, SecureChannel.ReadHeaderSize);
+                readBytes = FixedSizeReader.ReadPacket(InnerStream, buffer, 0, SecureChannel.ReadHeaderSize);
             }
             else
             {
                 asyncRequest.SetNextRequest(buffer, 0, SecureChannel.ReadHeaderSize, s_partialFrameCallback);
-                _ = FixedSizeReader.ReadPacketAsync(_innerStream, asyncRequest);
+                _ = FixedSizeReader.ReadPacketAsync(InnerStream, asyncRequest);
                 if (!asyncRequest.MustCompleteSynchronously)
                 {
                     return;
@@ -893,12 +652,12 @@ namespace System.Net.Security
 
             if (asyncRequest == null)
             {
-                restBytes = FixedSizeReader.ReadPacket(_innerStream, buffer, readBytes, restBytes);
+                restBytes = FixedSizeReader.ReadPacket(InnerStream, buffer, readBytes, restBytes);
             }
             else
             {
                 asyncRequest.SetNextRequest(buffer, readBytes, restBytes, s_readFrameCallback);
-                _ = FixedSizeReader.ReadPacketAsync(_innerStream, asyncRequest);
+                _ = FixedSizeReader.ReadPacketAsync(InnerStream, asyncRequest);
                 if (!asyncRequest.MustCompleteSynchronously)
                 {
                     return;
@@ -1038,14 +797,14 @@ namespace System.Net.Security
             }
 
             AsyncProtocolRequest asyncRequest;
-            SslState sslState;
+            SslStream sslStream;
 
 #if DEBUG
             try
             {
 #endif
                 asyncRequest = (AsyncProtocolRequest)transportResult.AsyncState;
-                sslState = (SslState)asyncRequest.AsyncObject;
+                sslStream = (SslStream)asyncRequest.AsyncObject;
 #if DEBUG
             }
             catch (Exception exception) when (!ExceptionCheck.IsFatal(exception))
@@ -1068,7 +827,7 @@ namespace System.Net.Security
                     exception.Throw();
                 }
 
-                sslState.CheckCompletionBeforeNextReceive((ProtocolToken)asyncState, asyncRequest);
+                sslStream.CheckCompletionBeforeNextReceive((ProtocolToken)asyncState, asyncRequest);
             }
             catch (Exception e)
             {
@@ -1078,7 +837,7 @@ namespace System.Net.Security
                     throw;
                 }
 
-                sslState.FinishHandshake(e, asyncRequest);
+                sslStream.FinishHandshake(e, asyncRequest);
             }
         }
 
@@ -1088,10 +847,10 @@ namespace System.Net.Security
                 NetEventSource.Enter(null);
 
             // Async ONLY completion.
-            SslState sslState = (SslState)asyncRequest.AsyncObject;
+            SslStream sslStream = (SslStream)asyncRequest.AsyncObject;
             try
             {
-                sslState.StartReadFrame(asyncRequest.Buffer, asyncRequest.Result, asyncRequest);
+                sslStream.StartReadFrame(asyncRequest.Buffer, asyncRequest.Result, asyncRequest);
             }
             catch (Exception e)
             {
@@ -1101,7 +860,7 @@ namespace System.Net.Security
                     throw;
                 }
 
-                sslState.FinishHandshake(e, asyncRequest);
+                sslStream.FinishHandshake(e, asyncRequest);
             }
         }
 
@@ -1113,7 +872,7 @@ namespace System.Net.Security
                 NetEventSource.Enter(null);
 
             // Async ONLY completion.
-            SslState sslState = (SslState)asyncRequest.AsyncObject;
+            SslStream sslStream = (SslStream)asyncRequest.AsyncObject;
             try
             {
                 if (asyncRequest.Result == 0)
@@ -1122,7 +881,7 @@ namespace System.Net.Security
                     asyncRequest.Offset = 0;
                 }
 
-                sslState.ProcessReceivedBlob(asyncRequest.Buffer, asyncRequest.Offset + asyncRequest.Result, asyncRequest);
+                sslStream.ProcessReceivedBlob(asyncRequest.Buffer, asyncRequest.Offset + asyncRequest.Result, asyncRequest);
             }
             catch (Exception e)
             {
@@ -1132,14 +891,14 @@ namespace System.Net.Security
                     throw;
                 }
 
-                sslState.FinishHandshake(e, asyncRequest);
+                sslStream.FinishHandshake(e, asyncRequest);
             }
         }
 
         private bool CheckEnqueueHandshakeRead(ref byte[] buffer, AsyncProtocolRequest request)
         {
             LazyAsyncResult lazyResult = null;
-            lock (this)
+            lock (SyncObject)
             {
                 if (_lockReadState == LockPendingRead)
                 {
@@ -1170,7 +929,7 @@ namespace System.Net.Security
 
         private void FinishHandshakeRead(int newState)
         {
-            lock (this)
+            lock (SyncObject)
             {
                 // Lock is redundant here. Included for clarity.
                 int lockState = Interlocked.Exchange(ref _lockReadState, newState);
@@ -1184,7 +943,7 @@ namespace System.Net.Security
                 HandleQueuedCallback(ref _queuedReadStateRequest);
             }
         }
-        
+
         // Returns:
         // -1    - proceed
         // 0     - queued
@@ -1200,7 +959,7 @@ namespace System.Net.Security
             }
 
             LazyAsyncResult lazyResult = null;
-            lock (this)
+            lock (SyncObject)
             {
                 int result = CheckOldKeyDecryptedData(buffer);
                 if (result != -1)
@@ -1223,7 +982,7 @@ namespace System.Net.Security
             }
             // Need to exit from lock before waiting.
             lazyResult.InternalWaitForCompletion();
-            lock (this)
+            lock (SyncObject)
             {
                 return CheckOldKeyDecryptedData(buffer);
             }
@@ -1239,7 +998,7 @@ namespace System.Net.Security
                 return new ValueTask<int>(CheckOldKeyDecryptedData(buffer));
             }
 
-            lock (this)
+            lock (SyncObject)
             {
                 int result = CheckOldKeyDecryptedData(buffer);
                 if (result != -1)
@@ -1271,7 +1030,7 @@ namespace System.Net.Security
                 return;
             }
 
-            lock (this)
+            lock (SyncObject)
             {
                 LazyAsyncResult ar = _queuedReadStateRequest as LazyAsyncResult;
                 if (ar != null)
@@ -1298,7 +1057,7 @@ namespace System.Net.Security
                 return Task.CompletedTask;
             }
 
-            lock (this)
+            lock (SyncObject)
             {
                 if (_lockWriteState != LockHandshake)
                 {
@@ -1325,7 +1084,7 @@ namespace System.Net.Security
             }
 
             LazyAsyncResult lazyResult = null;
-            lock (this)
+            lock (SyncObject)
             {
                 if (_lockWriteState != LockHandshake)
                 {
@@ -1354,7 +1113,7 @@ namespace System.Net.Security
                 return;
             }
 
-            lock (this)
+            lock (SyncObject)
             {
                 HandleQueuedCallback(ref _queuedWriteStateRequest);
             }
@@ -1392,7 +1151,7 @@ namespace System.Net.Security
                     taskCompletionSource.SetResult(0);
                     break;
                 default:
-                    ThreadPool.QueueUserWorkItem(s => s.sslState.AsyncResumeHandshake(s.obj), (sslState: this, obj), preferLocal: false);
+                    ThreadPool.QueueUserWorkItem(s => s.sslStream.AsyncResumeHandshake(s.obj), (sslStream: this, obj), preferLocal: false);
                     break;
             }
         }
@@ -1404,7 +1163,7 @@ namespace System.Net.Security
         {
             LazyAsyncResult lazyResult = null;
 
-            lock (this)
+            lock (SyncObject)
             {
                 if (_lockWriteState == LockPendingWrite)
                 {
@@ -1436,7 +1195,7 @@ namespace System.Net.Security
         {
             try
             {
-                lock (this)
+                lock (SyncObject)
                 {
                     if (e != null)
                     {
@@ -1834,7 +1593,7 @@ namespace System.Net.Security
             }
         }
 
-        internal IAsyncResult BeginShutdown(AsyncCallback asyncCallback, object asyncState)
+        internal IAsyncResult BeginShutdownInternal(AsyncCallback asyncCallback, object asyncState)
         {
             CheckThrow(authSuccessCheck: true, shutdownCheck: true);
 
@@ -1842,7 +1601,7 @@ namespace System.Net.Security
             return TaskToApm.Begin(InnerStream.WriteAsync(message.Payload, 0, message.Payload.Length), asyncCallback, asyncState);
         }
 
-        internal void EndShutdown(IAsyncResult result)
+        internal void EndShutdownInternal(IAsyncResult result)
         {
             CheckThrow(authSuccessCheck: true, shutdownCheck: true);
 

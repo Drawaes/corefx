@@ -21,13 +21,7 @@ namespace System.Net.Security
         {
         }
 
-        internal void ValidateCreateContext(SslClientAuthenticationOptions sslClientAuthenticationOptions, RemoteCertValidationCallback remoteCallback, LocalCertSelectionCallback localCallback)
-        {
-        }
-
-        internal void ValidateCreateContext(SslAuthenticationOptions sslAuthenticationOptions)
-        {
-        }
+        
 
         internal SslApplicationProtocol NegotiatedApplicationProtocol
         {
@@ -53,13 +47,7 @@ namespace System.Net.Security
             }
         }
 
-        internal bool RemoteCertRequired
-        {
-            get
-            {
-                return false;
-            }
-        }
+        
 
         internal bool IsServer
         {
@@ -156,22 +144,7 @@ namespace System.Net.Security
                 return null;
             }
         }
-
-        public bool IsShutdown { get; internal set; }
-
-        internal void CheckThrow(bool authSucessCheck)
-        {
-        }
-
-        internal void Flush()
-        {
-        }
-
-        internal Task FlushAsync(CancellationToken cancellationToken)
-        {
-            return Task.CompletedTask;
-        }
-
+               
         //
         // This is to not depend on GC&SafeHandle class if the context is not needed anymore.
         //
@@ -187,19 +160,13 @@ namespace System.Net.Security
         {
         }
 
-        internal void EndProcessAuthentication(IAsyncResult result)
-        {
-        }
 
         internal IAsyncResult BeginShutdown(AsyncCallback asyncCallback, object asyncState)
         {
             throw new NotImplementedException();
         }
 
-        internal void EndShutdown(IAsyncResult asyncResult)
-        {
-            throw new NotImplementedException();
-        }
+        
     }
 
     internal class _SslStream : Stream

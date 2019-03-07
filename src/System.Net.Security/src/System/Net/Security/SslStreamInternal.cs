@@ -18,7 +18,7 @@ namespace System.Net.Security
         private const int FrameOverhead = 32;
         private const int ReadBufferSize = 4096 * 4 + FrameOverhead;         // We read in 16K chunks + headers.
 
-        private readonly SslState _sslState;
+        private readonly SslStream _sslStream;
         private int _nestedWrite;
         private int _nestedRead;
 
@@ -31,9 +31,9 @@ namespace System.Net.Security
         private int _decryptedBytesOffset;
         private int _decryptedBytesCount;
 
-        internal SslStreamInternal(SslState sslState)
+        internal SslStreamInternal(SslStream sslStream)
         {
-            _sslState = sslState;
+            _sslStream = sslStream;
 
             _decryptedBytesOffset = 0;
             _decryptedBytesCount = 0;
@@ -127,7 +127,7 @@ namespace System.Net.Security
         internal int Read(byte[] buffer, int offset, int count)
         {
             ValidateParameters(buffer, offset, count);
-            SslReadSync reader = new SslReadSync(_sslState);
+            SslReadSync reader = new SslReadSync(_sslStream);
             return ReadAsyncInternal(reader, new Memory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
         }
 
@@ -135,7 +135,7 @@ namespace System.Net.Security
         {
             ValidateParameters(buffer, offset, count);
 
-            SslWriteSync writeAdapter = new SslWriteSync(_sslState);
+            SslWriteSync writeAdapter = new SslWriteSync(_sslStream);
             WriteAsyncInternal(writeAdapter, new ReadOnlyMemory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
         }
 
@@ -147,13 +147,13 @@ namespace System.Net.Security
         internal Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
             ValidateParameters(buffer, offset, count);
-            SslReadAsync read = new SslReadAsync(_sslState, cancellationToken);
+            SslReadAsync read = new SslReadAsync(_sslStream, cancellationToken);
             return ReadAsyncInternal(read, new Memory<byte>(buffer, offset, count)).AsTask();
         }
 
         internal ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
         {
-            SslReadAsync read = new SslReadAsync(_sslState, cancellationToken);
+            SslReadAsync read = new SslReadAsync(_sslStream, cancellationToken);
             return ReadAsyncInternal(read, buffer);
         }
 
@@ -168,7 +168,7 @@ namespace System.Net.Security
 
         internal ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
         {
-            SslWriteAsync writeAdapter = new SslWriteAsync(_sslState, cancellationToken);
+            SslWriteAsync writeAdapter = new SslWriteAsync(_sslStream, cancellationToken);
             return WriteAsyncInternal(writeAdapter, buffer);
         }
 
@@ -239,7 +239,7 @@ namespace System.Net.Security
                     {
                         copyBytes = CopyDecryptedData(buffer);
 
-                        _sslState.FinishRead(null);
+                        _sslStream.FinishRead(null);
 
                         return copyBytes;
                     }
@@ -257,7 +257,7 @@ namespace System.Net.Security
                         return 0;
                     }
 
-                    int payloadBytes = _sslState.GetRemainingFrameSize(_internalBuffer, _internalOffset, readBytes);
+                    int payloadBytes = _sslStream.GetRemainingFrameSize(_internalBuffer, _internalOffset, readBytes);
                     if (payloadBytes < 0)
                     {
                         throw new IOException(SR.net_frame_read_size);
@@ -275,7 +275,7 @@ namespace System.Net.Security
                     // DecryptData will decrypt in-place and modify these to point to the actual decrypted data, which may be smaller.
                     _decryptedBytesOffset = _internalOffset;
                     _decryptedBytesCount = readBytes;
-                    SecurityStatusPal status = _sslState.DecryptData(_internalBuffer, ref _decryptedBytesOffset, ref _decryptedBytesCount);
+                    SecurityStatusPal status = _sslStream.DecryptData(_internalBuffer, ref _decryptedBytesOffset, ref _decryptedBytesCount);
 
                     // Treat the bytes we just decrypted as consumed
                     // Note, we won't do another buffer read until the decrypted bytes are processed
@@ -298,12 +298,12 @@ namespace System.Net.Security
 
                         if (message.Renegotiate)
                         {
-                            if (!_sslState._sslAuthenticationOptions.AllowRenegotiation)
+                            if (!_sslStream._sslAuthenticationOptions.AllowRenegotiation)
                             {
                                 throw new IOException(SR.net_ssl_io_renego);
                             }
 
-                            _sslState.ReplyOnReAuthentication(extraBuffer);
+                            _sslStream.ReplyOnReAuthentication(extraBuffer);
 
                             // Loop on read.
                             continue;
@@ -311,7 +311,7 @@ namespace System.Net.Security
 
                         if (message.CloseConnection)
                         {
-                            _sslState.FinishRead(null);
+                            _sslStream.FinishRead(null);
                             return 0;
                         }
 
@@ -321,7 +321,7 @@ namespace System.Net.Security
             }
             catch (Exception e)
             {
-                _sslState.FinishRead(null);
+                _sslStream.FinishRead(null);
 
                 if (e is IOException)
                 {
@@ -339,7 +339,7 @@ namespace System.Net.Security
         private ValueTask WriteAsyncInternal<TWriteAdapter>(TWriteAdapter writeAdapter, ReadOnlyMemory<byte> buffer)
             where TWriteAdapter : struct, ISslWriteAdapter
         {
-            _sslState.CheckThrow(authSuccessCheck: true, shutdownCheck: true);
+            _sslStream.CheckThrow(authSuccessCheck: true, shutdownCheck: true);
 
             if (buffer.Length == 0 && !SslStreamPal.CanEncryptEmptyMessage)
             {
@@ -352,7 +352,7 @@ namespace System.Net.Security
                 throw new NotSupportedException(SR.Format(SR.net_io_invalidnestedcall, nameof(WriteAsync), "write"));
             }
 
-            ValueTask t = buffer.Length < _sslState.MaxDataSize ?
+            ValueTask t = buffer.Length < _sslStream.MaxDataSize ?
                     WriteSingleChunk(writeAdapter, buffer) :
                     new ValueTask(WriteAsyncChunked(writeAdapter, buffer));
 
@@ -371,7 +371,7 @@ namespace System.Net.Security
                 }
                 catch (Exception e)
                 {
-                    _sslState.FinishWrite();
+                    _sslStream.FinishWrite();
 
                     if (e is IOException)
                     {
@@ -401,7 +401,7 @@ namespace System.Net.Security
             byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length + FrameOverhead);
             byte[] outBuffer = rentedBuffer;
 
-            SecurityStatusPal status = _sslState.EncryptData(buffer, ref outBuffer, out int encryptedBytes);
+            SecurityStatusPal status = _sslStream.EncryptData(buffer, ref outBuffer, out int encryptedBytes);
 
             if (status.ErrorCode != SecurityStatusPalErrorCode.OK)
             {
@@ -415,7 +415,7 @@ namespace System.Net.Security
             if (t.IsCompletedSuccessfully)
             {
                 ArrayPool<byte>.Shared.Return(rentedBuffer);
-                _sslState.FinishWrite();
+                _sslStream.FinishWrite();
                 return t;
             }
             else
@@ -438,7 +438,7 @@ namespace System.Net.Security
                 finally
                 {
                     ArrayPool<byte>.Shared.Return(bufferToReturn);
-                    _sslState.FinishWrite();
+                    _sslStream.FinishWrite();
                 }
             }
         }
@@ -448,7 +448,7 @@ namespace System.Net.Security
         {
             do
             {
-                int chunkBytes = Math.Min(buffer.Length, _sslState.MaxDataSize);
+                int chunkBytes = Math.Min(buffer.Length, _sslStream.MaxDataSize);
                 await WriteSingleChunk(writeAdapter, buffer.Slice(0, chunkBytes)).ConfigureAwait(false);
                 buffer = buffer.Slice(chunkBytes);
 

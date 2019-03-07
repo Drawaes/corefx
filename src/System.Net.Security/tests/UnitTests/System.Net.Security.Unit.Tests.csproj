@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <ProjectGuid>{0D174EA9-9E61-4519-8D31-7BD2331A1982}</ProjectGuid>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -12,6 +12,9 @@
     <Configurations>netcoreapp-OSX-Debug;netcoreapp-OSX-Release;netcoreapp-Unix-Debug;netcoreapp-Unix-Release;netcoreapp-Windows_NT-Debug;netcoreapp-Windows_NT-Release;uap-Windows_NT-Debug;uap-Windows_NT-Release</Configurations>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Fakes\FakeSecureChannel.cs" />
+    <Compile Include="Fakes\FakeSslStream.Implementation.cs" />
+    <Compile Include="Fakes\FakeSslStreamInternal.cs" />
     <Compile Include="SslApplicationProtocolTests.cs" />
     <Compile Include="SslAuthenticationOptionsTests.cs" />
     <Compile Include="SslStreamAllowedProtocolsTest.cs" />
@@ -44,6 +47,9 @@
     </Compile>
     <Compile Include="..\..\src\System\Net\Security\SslApplicationProtocol.cs">
       <Link>ProductionCode\System\Net\Security\SslApplicationProtocol.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\System\Net\Security\SslConnectionInfo.cs">
+      <Link>ProductionCode\System\Net\Security\SslConnectionInfo.cs</Link>
     </Compile>
     <Compile Include="..\..\src\System\Net\SslStreamContext.cs">
       <Link>ProductionCode\System\Net\SslStreamContext.cs</Link>
