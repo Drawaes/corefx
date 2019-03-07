@@ -90,7 +90,7 @@ namespace System.Net.Security
             _secureStream = new SslStreamInternal(this);
         }
 
-        public SslApplicationProtocol NegotiatedApplicationProtocol => Context?.NegotiatedApplicationProtocol ?? default;
+        public SslApplicationProtocol NegotiatedApplicationProtocol => _context?.NegotiatedApplicationProtocol ?? default;
 
         private void SetAndVerifyValidationCallback(RemoteCertificateValidationCallback callback)
         {
@@ -272,7 +272,7 @@ namespace System.Net.Security
         }
         public TransportContext TransportContext => new SslStreamContext(this);
 
-        internal ChannelBinding GetChannelBinding(ChannelBindingKind kind) => Context?.GetChannelBinding(kind);
+        internal ChannelBinding GetChannelBinding(ChannelBindingKind kind) => _context?.GetChannelBinding(kind);
 
         #region Synchronous methods
         public virtual void AuthenticateAsClient(string targetHost)
@@ -427,8 +427,8 @@ namespace System.Net.Security
             {
                 return
                     IsAuthenticated &&
-                    (Context.IsServer ? Context.LocalServerCertificate : Context.LocalClientCertificate) != null &&
-                    Context.IsRemoteCertificateAvailable; /* does not work: Context.IsMutualAuthFlag;*/
+                    (_context.IsServer ? _context.LocalServerCertificate : _context.LocalClientCertificate) != null &&
+                    _context.IsRemoteCertificateAvailable; /* does not work: Context.IsMutualAuthFlag;*/
             }
         }
 
@@ -436,14 +436,14 @@ namespace System.Net.Security
 
         public override bool IsSigned => IsAuthenticated;
 
-        public override bool IsServer => Context != null && Context.IsServer;
+        public override bool IsServer => _context != null && _context.IsServer;
 
         public virtual SslProtocols SslProtocol
         {
             get
             {
                 CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
+                SslConnectionInfo info = _context.ConnectionInfo;
                 if (info == null)
                 {
                     return SslProtocols.None;
@@ -489,7 +489,7 @@ namespace System.Net.Security
             }
         }
 
-        public virtual bool CheckCertRevocationStatus => Context != null && Context.CheckCertRevocationStatus != X509RevocationMode.NoCheck;
+        public virtual bool CheckCertRevocationStatus => _context != null && _context.CheckCertRevocationStatus != X509RevocationMode.NoCheck;
 
         //
         // This will return selected local cert for both client/server streams
@@ -499,7 +499,7 @@ namespace System.Net.Security
             get
             {
                 CheckThrow(true);
-                return  Context.IsServer ? Context.LocalServerCertificate : Context.LocalClientCertificate;
+                return _context.IsServer ? _context.LocalServerCertificate : _context.LocalClientCertificate;
             }
         }
 
@@ -518,7 +518,7 @@ namespace System.Net.Security
             get
             {
                 CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
+                SslConnectionInfo info = _context.ConnectionInfo;
                 if (info == null)
                 {
                     return CipherAlgorithmType.None;
@@ -532,7 +532,7 @@ namespace System.Net.Security
             get
             {
                 CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
+                SslConnectionInfo info = _context.ConnectionInfo;
                 if (info == null)
                 {
                     return 0;
@@ -547,7 +547,7 @@ namespace System.Net.Security
             get
             {
                 CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
+                SslConnectionInfo info = _context.ConnectionInfo;
                 if (info == null)
                 {
                     return (HashAlgorithmType)0;
@@ -561,7 +561,7 @@ namespace System.Net.Security
             get
             {
                 CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
+                SslConnectionInfo info = _context.ConnectionInfo;
                 if (info == null)
                 {
                     return 0;
@@ -576,7 +576,7 @@ namespace System.Net.Security
             get
             {
                 CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
+                SslConnectionInfo info = _context.ConnectionInfo;
                 if (info == null)
                 {
                     return (ExchangeAlgorithmType)0;
@@ -591,7 +591,7 @@ namespace System.Net.Security
             get
             {
                 CheckThrow(true);
-                SslConnectionInfo info = Context.ConnectionInfo;
+                SslConnectionInfo info = _context.ConnectionInfo;
                 if (info == null)
                 {
                     return 0;
