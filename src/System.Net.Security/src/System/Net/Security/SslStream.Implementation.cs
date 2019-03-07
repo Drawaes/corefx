@@ -28,8 +28,7 @@ namespace System.Net.Security
         private SecureChannel _context;
 
         private bool _handshakeCompleted;
-        private bool _shutdown;
-
+        
         private SecurityStatusPal _securityStatus;
         
         private enum CachedSessionStatus : byte
@@ -152,14 +151,6 @@ namespace System.Net.Security
             get
             {
                 return _context == null || _context.RemoteCertRequired;
-            }
-        }
-
-        internal bool IsShutdown
-        {
-            get
-            {
-                return _shutdown;
             }
         }
 

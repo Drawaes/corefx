@@ -46,6 +46,7 @@ namespace System.Net.Security
 
         internal void EndShutdownInternal(IAsyncResult result)
         {
+            _shutdown = true;
         }
 
         internal bool RemoteCertRequired

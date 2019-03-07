@@ -52,6 +52,8 @@ namespace System.Net.Security
         private readonly SslStreamInternal _secureStream;
         private ExceptionDispatchInfo _exception;
 
+        private bool _shutdown;
+
         public SslStream(Stream innerStream)
                 : this(innerStream, false, null, null)
         {
@@ -576,13 +578,7 @@ namespace System.Net.Security
             get
             {
                 CheckThrow(true);
-                SslConnectionInfo info = _context.ConnectionInfo;
-                if (info == null)
-                {
-                    return (ExchangeAlgorithmType)0;
-                }
-
-                return (ExchangeAlgorithmType)info.KeyExchangeAlg;
+                return (ExchangeAlgorithmType)(_context.ConnectionInfo?.KeyExchangeAlg ?? 0);
             }
         }
 
@@ -610,7 +606,7 @@ namespace System.Net.Security
 
         public override bool CanTimeout => InnerStream.CanTimeout;
 
-        public override bool CanWrite => IsAuthenticated && InnerStream.CanWrite && !IsShutdown;
+        public override bool CanWrite => IsAuthenticated && InnerStream.CanWrite && !_shutdown;
 
         public override int ReadTimeout
         {
