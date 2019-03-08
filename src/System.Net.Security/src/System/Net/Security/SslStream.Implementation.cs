@@ -27,9 +27,7 @@ namespace System.Net.Security
 
         private int _nestedAuth;
         private SecureChannel _context;
-
-        private bool _handshakeCompleted;
-
+        
         private SecurityStatusPal _securityStatus;
 
         private enum CachedSessionStatus : byte

@@ -21,6 +21,7 @@ namespace System.Net.Security
             _internalOffset = 0;
             _internalBuffer = new byte[0];
             _internalBufferCount = 0;
+            _handshakeCompleted = true;
             if(_internalOffset == 0 && _internalBufferCount == 0 && _internalBuffer.Length == 0 && _nestedWrite == 0)
             {
             }

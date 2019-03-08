@@ -53,6 +53,8 @@ namespace System.Net.Security
         private int _nestedWrite;
         private int _nestedRead;
 
+        private bool _handshakeCompleted;
+
         private int _decryptedBytesOffset;
         private int _decryptedBytesCount;
 
