@@ -197,18 +197,6 @@ namespace System.Net.Security
             }
         }
 
-        private SecurityStatusPal EncryptData(ReadOnlyMemory<byte> buffer, ref byte[] outBuffer, out int outSize)
-        {
-            CheckThrow(true);
-            return _context.Encrypt(buffer, ref outBuffer, out outSize);
-        }
-
-        private SecurityStatusPal DecryptData(byte[] buffer, ref int offset, ref int count)
-        {
-            CheckThrow(true);
-            return PrivateDecryptData(buffer, ref offset, ref count);
-        }
-
         private SecurityStatusPal PrivateDecryptData(byte[] buffer, ref int offset, ref int count) => _context.Decrypt(buffer, ref offset, ref count);
 
         //
@@ -1617,7 +1605,7 @@ namespace System.Net.Security
                     // DecryptData will decrypt in-place and modify these to point to the actual decrypted data, which may be smaller.
                     _decryptedBytesOffset = _internalOffset;
                     _decryptedBytesCount = readBytes;
-                    SecurityStatusPal status = DecryptData(_internalBuffer, ref _decryptedBytesOffset, ref _decryptedBytesCount);
+                    SecurityStatusPal status = PrivateDecryptData(_internalBuffer, ref _decryptedBytesOffset, ref _decryptedBytesCount);
 
                     // Treat the bytes we just decrypted as consumed
                     // Note, we won't do another buffer read until the decrypted bytes are processed
@@ -1874,7 +1862,7 @@ namespace System.Net.Security
             byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length + FrameOverhead);
             byte[] outBuffer = rentedBuffer;
 
-            SecurityStatusPal status = EncryptData(buffer, ref outBuffer, out int encryptedBytes);
+            SecurityStatusPal status = _context.Encrypt(buffer, ref outBuffer, out int encryptedBytes);
 
             if (status.ErrorCode != SecurityStatusPalErrorCode.OK)
             {
