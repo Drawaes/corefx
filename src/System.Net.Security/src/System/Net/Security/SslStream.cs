@@ -429,7 +429,7 @@ namespace System.Net.Security
                 this);
         #endregion
 
-        public override bool IsAuthenticated => _context != null && _context.IsValidContext && _exception == null && HandshakeCompleted;
+        public override bool IsAuthenticated => _context != null && _context.IsValidContext && _exception == null && _handshakeCompleted;
 
         public override bool IsMutuallyAuthenticated
         {
@@ -709,7 +709,13 @@ namespace System.Net.Security
             return bytesRead == 1 ? oneByte[0] : -1;
         }
 
-        public override int Read(byte[] buffer, int offset, int count) => ReadInternal(buffer, offset, count);
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            CheckThrow(true);
+            ValidateParameters(buffer, offset, count);
+            SslReadSync reader = new SslReadSync(this);
+            return ReadAsyncInternal(reader, new Memory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
+        }
 
         public void Write(byte[] buffer) => Write(buffer, 0, buffer.Length);
 
@@ -722,16 +728,16 @@ namespace System.Net.Security
             WriteAsyncInternal(writeAdapter, new ReadOnlyMemory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
         }
 
-        public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => BeginReadInternal(buffer, offset, count, asyncCallback, asyncState);
+        public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => TaskToApm.Begin(ReadAsync(buffer, offset, count, CancellationToken.None), asyncCallback, asyncState);
 
         public override int EndRead(IAsyncResult asyncResult) => TaskToApm.End<int>(asyncResult);
 
-        public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => BeginWriteInternal(buffer, offset, count, asyncCallback, asyncState);
+        public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => TaskToApm.Begin(WriteAsync(buffer, offset, count, CancellationToken.None), asyncCallback, asyncState);
 
         public override void EndWrite(IAsyncResult asyncResult)
         {
             CheckThrow(true);
-            EndWriteInternal(asyncResult);
+            TaskToApm.End(asyncResult);
         }
 
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)

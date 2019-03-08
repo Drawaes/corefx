@@ -30,8 +30,6 @@ namespace System.Net.Security
         {
         }
 
-        private SecureChannel Context => default;
-
         internal Stream InternalInnerStream => default;
 
         private void ReturnReadBufferIfEmpty()
@@ -59,18 +57,12 @@ namespace System.Net.Security
         private ValueTask WriteAsyncInternal<TWriteAdapter>(TWriteAdapter writeAdapter, ReadOnlyMemory<byte> buffer)
             where TWriteAdapter : struct, ISslWriteAdapter => default;
 
-        internal void WriteInternal(byte[] buffer, int offset, int count)
-        {
-        }
-
         internal IAsyncResult BeginReadInternal(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => default;
 
         private ValueTask<int> ReadAsyncInternal<TReadAdapter>(TReadAdapter adapter, Memory<byte> buffer)
             where TReadAdapter : ISslReadAdapter => default;
 
         internal IAsyncResult BeginWriteInternal(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => default;
-
-        private int ReadByteInternal() => default;
 
         internal int ReadInternal(byte[] buffer, int offset, int count) => default;
 
@@ -81,10 +73,6 @@ namespace System.Net.Security
         internal ValueTask<int> CheckEnqueueReadAsync(Memory<byte> buffer) => default;
 
         internal Task CheckEnqueueWriteAsync() => default;
-
-        internal void EndWriteInternal(IAsyncResult asyncResult)
-        {
-        }
 
         private void ValidateParameters(byte[] buffer, int offset, int count)
         {

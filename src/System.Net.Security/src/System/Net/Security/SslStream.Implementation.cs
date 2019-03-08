@@ -150,29 +150,9 @@ namespace System.Net.Security
             }
         }
 
-        private bool RemoteCertRequired
-        {
-            get
-            {
-                return _context == null || _context.RemoteCertRequired;
-            }
-        }
+        private bool RemoteCertRequired => _context == null || _context.RemoteCertRequired;
 
-        private Stream InternalInnerStream
-        {
-            get
-            {
-                return InnerStream;
-            }
-        }
-
-        private int MaxDataSize
-        {
-            get
-            {
-                return _context.MaxDataSize;
-            }
-        }
+        private Stream InternalInnerStream => InnerStream;
 
         private void SetException(Exception e)
         {
@@ -184,14 +164,6 @@ namespace System.Net.Security
             }
 
             _context?.Close();
-        }
-
-        private bool HandshakeCompleted
-        {
-            get
-            {
-                return _handshakeCompleted;
-            }
         }
 
         private void CheckThrow(bool authSuccessCheck, bool shutdownCheck = false)
@@ -216,7 +188,13 @@ namespace System.Net.Security
         {
             _exception = s_disposedSentinel;
             _context?.Close();
-            DisposeInternal();
+            DisposeInternal(disposing: true);
+
+            if (_internalBuffer == null)
+            {
+                // Suppress finalizer if the read buffer was returned.
+                GC.SuppressFinalize(this);
+            }
         }
 
         private SecurityStatusPal EncryptData(ReadOnlyMemory<byte> buffer, ref byte[] outBuffer, out int outSize)
@@ -231,10 +209,7 @@ namespace System.Net.Security
             return PrivateDecryptData(buffer, ref offset, ref count);
         }
 
-        private SecurityStatusPal PrivateDecryptData(byte[] buffer, ref int offset, ref int count)
-        {
-            return _context.Decrypt(buffer, ref offset, ref count);
-        }
+        private SecurityStatusPal PrivateDecryptData(byte[] buffer, ref int offset, ref int count) => _context.Decrypt(buffer, ref offset, ref count);
 
         //
         //  Called by re-handshake if found data decrypted with the old key
@@ -288,6 +263,7 @@ namespace System.Net.Security
             }
             return -1;
         }
+
         //
         // This method assumes that a SSPI context is already in a good shape.
         // For example it is either a fresh context or already authenticated context that needs renegotiation.
@@ -1588,23 +1564,6 @@ namespace System.Net.Security
             return TaskToApm.Begin(InnerStream.WriteAsync(message.Payload, 0, message.Payload.Length), asyncCallback, asyncState);
         }
 
-        private int ReadInternal(byte[] buffer, int offset, int count)
-        {
-            ValidateParameters(buffer, offset, count);
-            SslReadSync reader = new SslReadSync(this);
-            return ReadAsyncInternal(reader, new Memory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
-        }
-
-        private IAsyncResult BeginReadInternal(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState)
-        {
-            return TaskToApm.Begin(ReadAsync(buffer, offset, count, CancellationToken.None), asyncCallback, asyncState);
-        }
-
-        private IAsyncResult BeginWriteInternal(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState)
-        {
-            return TaskToApm.Begin(WriteAsync(buffer, offset, count, CancellationToken.None), asyncCallback, asyncState);
-        }
-
         private async ValueTask<int> ReadAsyncInternal<TReadAdapter>(TReadAdapter adapter, Memory<byte> buffer)
             where TReadAdapter : ISslReadAdapter
         {
@@ -1801,7 +1760,7 @@ namespace System.Net.Security
         {
             do
             {
-                int chunkBytes = Math.Min(buffer.Length, MaxDataSize);
+                int chunkBytes = Math.Min(buffer.Length, _context.MaxDataSize);
                 await WriteSingleChunk(writeAdapter, buffer.Slice(0, chunkBytes)).ConfigureAwait(false);
                 buffer = buffer.Slice(chunkBytes);
 
@@ -1866,7 +1825,7 @@ namespace System.Net.Security
                 throw new NotSupportedException(SR.Format(SR.net_io_invalidnestedcall, nameof(WriteAsync), "write"));
             }
 
-            ValueTask t = buffer.Length < MaxDataSize ?
+            ValueTask t = buffer.Length < _context.MaxDataSize ?
                     WriteSingleChunk(writeAdapter, buffer) :
                     new ValueTask(WriteAsyncChunked(writeAdapter, buffer));
 
@@ -1956,9 +1915,7 @@ namespace System.Net.Security
                 }
             }
         }
-
-        private void EndWriteInternal(IAsyncResult asyncResult) => TaskToApm.End(asyncResult);
-
+                
         //
         // Validates user parameters for all Read/Write methods.
         //
@@ -1982,17 +1939,6 @@ namespace System.Net.Security
             if (count > buffer.Length - offset)
             {
                 throw new ArgumentOutOfRangeException(nameof(count), SR.net_offset_plus_count);
-            }
-        }
-
-        private void DisposeInternal()
-        {
-            DisposeInternal(disposing: true);
-
-            if (_internalBuffer == null)
-            {
-                // Suppress finalizer if the read buffer was returned.
-                GC.SuppressFinalize(this);
             }
         }
 
