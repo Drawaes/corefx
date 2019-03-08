@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <ProjectGuid>{0D174EA9-9E61-4519-8D31-7BD2331A1982}</ProjectGuid>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -12,6 +12,8 @@
     <Configurations>netcoreapp-OSX-Debug;netcoreapp-OSX-Release;netcoreapp-Unix-Debug;netcoreapp-Unix-Release;netcoreapp-Windows_NT-Debug;netcoreapp-Windows_NT-Release;uap-Windows_NT-Debug;uap-Windows_NT-Release</Configurations>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Fakes\FakeSecureChannel.cs" />
+    <Compile Include="Fakes\FakeSslStream.Implementation.cs" />
     <Compile Include="SslApplicationProtocolTests.cs" />
     <Compile Include="SslAuthenticationOptionsTests.cs" />
     <Compile Include="SslStreamAllowedProtocolsTest.cs" />
@@ -20,7 +22,6 @@
     <Compile Include="System\Security\Authentication\InvalidCredentialExceptionTest.cs" />
     <Compile Include="TlsAlertsMatchWindowsInterop.cs" />
     <!-- Fakes -->
-    <Compile Include="Fakes\FakeSslState.cs" />
     <Compile Include="Fakes\FakeAuthenticatedStream.cs" />
     <Compile Include="Fakes\FakeLazyAsyncResult.cs" />
     <!-- Common test files -->
@@ -45,17 +46,26 @@
     <Compile Include="..\..\src\System\Net\Security\SslApplicationProtocol.cs">
       <Link>ProductionCode\System\Net\Security\SslApplicationProtocol.cs</Link>
     </Compile>
+    <Compile Include="..\..\src\System\Net\Security\SslConnectionInfo.cs">
+      <Link>ProductionCode\System\Net\Security\SslConnectionInfo.cs</Link>
+    </Compile>
     <Compile Include="..\..\src\System\Net\SslStreamContext.cs">
       <Link>ProductionCode\System\Net\SslStreamContext.cs</Link>
     </Compile>
     <Compile Include="$(CommonPath)\System\Net\SecurityProtocol.cs">
       <Link>ProductionCode\Common\System\Net\SecurityProtocol.cs</Link>
     </Compile>
+    <Compile Include="$(CommonPath)\CoreLib\System\Threading\Tasks\TaskToApm.cs">
+      <Link>ProductionCode\Common\CoreLib\System\Threading\Tasks\TaskToApm.cs</Link>
+    </Compile>
     <Compile Include="..\..\src\System\Net\Security\TlsAlertType.cs">
       <Link>ProductionCode\Common\System\Net\TlsAlertType.cs</Link>
     </Compile>
     <Compile Include="..\..\src\System\Net\Security\TlsAlertMessage.cs">
       <Link>ProductionCode\Common\System\Net\TlsAlertMessage.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\System\Net\Security\SslStream.Adapters.cs">
+      <Link>ProductionCode\Common\System\Net\SslStream.Adapters.cs</Link>
     </Compile>
     <Compile Include="$(CommonPath)\Interop\Windows\SChannel\Interop.Alerts.cs">
       <Link>Common\Interop\Windows\SChannel\Interop.Alerts.cs</Link>
