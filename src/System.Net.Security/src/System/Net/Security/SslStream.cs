@@ -713,8 +713,9 @@ namespace System.Net.Security
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            CheckThrow(true);
             ValidateParameters(buffer, offset, count);
+            CheckThrow(true);
+
             SslReadSync reader = new SslReadSync(this);
             return ReadAsyncInternal(reader, new Memory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
         }
@@ -723,8 +724,8 @@ namespace System.Net.Security
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            CheckThrow(true);
             ValidateParameters(buffer, offset, count);
+            CheckThrow(true);
 
             SslWriteSync writeAdapter = new SslWriteSync(this);
             WriteAsyncInternal(writeAdapter, new ReadOnlyMemory<byte>(buffer, offset, count)).GetAwaiter().GetResult();
@@ -738,14 +739,13 @@ namespace System.Net.Security
 
         public override void EndWrite(IAsyncResult asyncResult)
         {
-            CheckThrow(true);
             TaskToApm.End(asyncResult);
         }
 
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
-            CheckThrow(true);
             ValidateParameters(buffer, offset, count);
+            CheckThrow(true);
             return WriteAsync(new ReadOnlyMemory<byte>(buffer, offset, count), cancellationToken).AsTask();
         }
 
