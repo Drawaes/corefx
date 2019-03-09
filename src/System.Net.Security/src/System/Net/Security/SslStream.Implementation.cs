@@ -1,15 +1,10 @@
-﻿using System;
-using System.Buffers;
-using System.Collections.Generic;
+﻿using System.Buffers;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Security.Authentication;
-using System.Security.Authentication.ExtendedProtection;
-using System.Security.Cryptography.X509Certificates;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,17 +14,15 @@ namespace System.Net.Security
     {
 
         private static int s_uniqueNameInteger = 123;
-        private static AsyncProtocolCallback s_partialFrameCallback = new AsyncProtocolCallback(PartialFrameCallback);
-        private static AsyncProtocolCallback s_readFrameCallback = new AsyncProtocolCallback(ReadFrameCallback);
-        private static AsyncCallback s_writeCallback = new AsyncCallback(WriteCallback);
+        private static readonly AsyncProtocolCallback s_partialFrameCallback = new AsyncProtocolCallback(PartialFrameCallback);
+        private static readonly AsyncProtocolCallback s_readFrameCallback = new AsyncProtocolCallback(ReadFrameCallback);
+        private static readonly AsyncCallback s_writeCallback = new AsyncCallback(WriteCallback);
 
         private SslAuthenticationOptions _sslAuthenticationOptions;
 
         private int _nestedAuth;
         private SecureChannel _context;
         
-        private SecurityStatusPal _securityStatus;
-
         private enum CachedSessionStatus : byte
         {
             Unknown = 0,
@@ -37,7 +30,7 @@ namespace System.Net.Security
             IsCached = 2,
             Renegotiated = 3
         }
-        private CachedSessionStatus _CachedSession;
+        private CachedSessionStatus _cachedSession;
 
         // This block is used by re-handshake code to buffer data decrypted with the old key.
         private byte[] _queuedReadData;
@@ -186,7 +179,7 @@ namespace System.Net.Security
         {
             _exception = s_disposedSentinel;
             _context?.Close();
-            DisposeInternal(disposing: true);
+            DisposeInternal();
 
             if (_internalBuffer == null)
             {
@@ -275,7 +268,7 @@ namespace System.Net.Security
                 }
 
                 //  A trick to discover and avoid cached sessions.
-                _CachedSession = CachedSessionStatus.Unknown;
+                _cachedSession = CachedSessionStatus.Unknown;
 
                 ForceAuthentication(_context.IsServer, null, asyncRequest);
 
@@ -354,7 +347,7 @@ namespace System.Net.Security
             // Either Sync handshake is ready to go or async handshake won the race over write.
 
             // This will tell that we don't know the framing yet (what SSL version is)
-            _Framing = Framing.Unknown;
+            _framing = Framing.Unknown;
 
             try
             {
@@ -372,7 +365,7 @@ namespace System.Net.Security
             catch (Exception e)
             {
                 // Failed auth, reset the framing if any.
-                _Framing = Framing.Unknown;
+                _framing = Framing.Unknown;
                 _handshakeCompleted = false;
 
                 SetException(e);
@@ -399,8 +392,7 @@ namespace System.Net.Security
                 throw new ArgumentNullException("asyncResult");
             }
 
-            LazyAsyncResult lazyResult = result as LazyAsyncResult;
-            if (lazyResult == null)
+            if (!(result is LazyAsyncResult lazyResult))
             {
                 throw new ArgumentException(SR.Format(SR.net_io_async_result, result.GetType().FullName), "asyncResult");
             }
@@ -431,12 +423,11 @@ namespace System.Net.Security
         {
             // No "artificial" timeouts implemented so far, InnerStream controls that.
             lazyResult.InternalWaitForCompletion();
-            Exception e = lazyResult.Result as Exception;
 
-            if (e != null)
+            if (lazyResult.Result is Exception e)
             {
                 // Failed auth, reset the framing if any.
-                _Framing = Framing.Unknown;
+                _framing = Framing.Unknown;
                 _handshakeCompleted = false;
 
                 SetException(e);
@@ -450,22 +441,21 @@ namespace System.Net.Security
         private void StartSendBlob(byte[] incoming, int count, AsyncProtocolRequest asyncRequest)
         {
             ProtocolToken message = _context.NextMessage(incoming, 0, count);
-            _securityStatus = message.Status;
 
             if (message.Size != 0)
             {
-                if (_context.IsServer && _CachedSession == CachedSessionStatus.Unknown)
+                if (_context.IsServer && _cachedSession == CachedSessionStatus.Unknown)
                 {
                     //
                     //[Schannel] If the first call to ASC returns a token less than 200 bytes,
                     //           then it's a reconnect (a handshake based on a cache entry).
                     //
-                    _CachedSession = message.Size < 200 ? CachedSessionStatus.IsCached : CachedSessionStatus.IsNotCached;
+                    _cachedSession = message.Size < 200 ? CachedSessionStatus.IsCached : CachedSessionStatus.IsNotCached;
                 }
 
-                if (_Framing == Framing.Unified)
+                if (_framing == Framing.Unified)
                 {
-                    _Framing = DetectFraming(message.Payload, message.Payload.Length);
+                    _framing = DetectFraming(message.Payload, message.Payload.Length);
                 }
 
                 if (asyncRequest == null)
@@ -579,9 +569,9 @@ namespace System.Net.Security
                 throw new IOException(SR.net_auth_eof);
             }
 
-            if (_Framing == Framing.Unknown)
+            if (_framing == Framing.Unknown)
             {
-                _Framing = DetectFraming(buffer, readBytes);
+                _framing = DetectFraming(buffer, readBytes);
             }
 
             int restBytes = GetRemainingFrameSize(buffer, 0, readBytes);
@@ -644,7 +634,7 @@ namespace System.Net.Security
                         return;
                     }
 
-                    _Framing = Framing.Unknown;
+                    _framing = Framing.Unknown;
                     StartReceiveBlob(buffer, asyncRequest);
                     return;
                 }
@@ -770,8 +760,7 @@ namespace System.Net.Security
 
                 // Special case for an error notification.
                 object asyncState = asyncRequest.AsyncState;
-                ExceptionDispatchInfo exception = asyncState as ExceptionDispatchInfo;
-                if (exception != null)
+                if (asyncState is ExceptionDispatchInfo exception)
                 {
                     exception.Throw();
                 }
@@ -981,8 +970,7 @@ namespace System.Net.Security
 
             lock (SyncObject)
             {
-                LazyAsyncResult ar = _queuedReadStateRequest as LazyAsyncResult;
-                if (ar != null)
+                if (_queuedReadStateRequest is LazyAsyncResult ar)
                 {
                     _queuedReadStateRequest = null;
                     ar.InvokeCallback(renegotiateBuffer);
@@ -1205,7 +1193,7 @@ namespace System.Net.Security
         }
 
         // This is set on the first packet to figure out the framing style.
-        private Framing _Framing = Framing.Unknown;
+        private Framing _framing = Framing.Unknown;
 
         // SSL3/TLS protocol frames definitions.
         private enum FrameType : byte
@@ -1368,7 +1356,7 @@ namespace System.Net.Security
                 // If this is the first packet, the client may start with an SSL2 packet
                 // but stating that the version is 3.x, so check the full range.
                 // For the subsequent packets we assume that an SSL2 packet should have a 2.x version.
-                if (_Framing == Framing.Unknown)
+                if (_framing == Framing.Unknown)
                 {
                     if (version != 0x0002 && (version < 0x200 || version >= 0x500))
                     {
@@ -1385,7 +1373,7 @@ namespace System.Net.Security
             }
 
             // When server has replied the framing is already fixed depending on the prior client packet
-            if (!_context.IsServer || _Framing == Framing.Unified)
+            if (!_context.IsServer || _framing == Framing.Unified)
             {
                 return Framing.BeforeSSL3;
             }
@@ -1401,7 +1389,7 @@ namespace System.Net.Security
                 NetEventSource.Enter(this, buffer, offset, dataSize);
 
             int payloadSize = -1;
-            switch (_Framing)
+            switch (_framing)
             {
                 case Framing.Unified:
                 case Framing.BeforeSSL3:
@@ -1507,8 +1495,7 @@ namespace System.Net.Security
             // If the rehandshake succeeded, FinishHandshake has already been called; if there was a SocketException
             // during the handshake, this gets called directly from FixedSizeReader, and we need to call
             // FinishHandshake to wake up the Read that triggered this rehandshake so the error gets back to the caller
-            Exception exception = lazyAsyncResult.InternalWaitForCompletion() as Exception;
-            if (exception != null)
+            if (lazyAsyncResult.InternalWaitForCompletion() is Exception exception)
             {
                 // We may be calling FinishHandshake reentrantly, as FinishHandshake can call
                 // asyncRequest.CompleteWithError, which will result in this method being called.
@@ -1928,7 +1915,7 @@ namespace System.Net.Security
             }
         }
 
-        private void DisposeInternal(bool disposing)
+        private void DisposeInternal()
         {
             // Ensure a Read operation is not in progress,
             // block potential reads since SslStream is disposing.
