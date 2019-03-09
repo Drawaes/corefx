@@ -58,16 +58,10 @@ namespace System.Net.Security
         private ValueTask WriteAsyncInternal<TWriteAdapter>(TWriteAdapter writeAdapter, ReadOnlyMemory<byte> buffer)
             where TWriteAdapter : struct, ISslWriteAdapter => default;
 
-        internal IAsyncResult BeginReadInternal(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => default;
-
         private ValueTask<int> ReadAsyncInternal<TReadAdapter>(TReadAdapter adapter, Memory<byte> buffer)
             where TReadAdapter : ISslReadAdapter => default;
 
-        internal IAsyncResult BeginWriteInternal(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState) => default;
-
         internal int ReadInternal(byte[] buffer, int offset, int count) => default;
-
-        internal int EndReadInternal(IAsyncResult asyncResult) => default;
 
         internal int CheckEnqueueRead(Memory<byte> buffer) => default;
 
@@ -90,14 +84,6 @@ namespace System.Net.Security
             _shutdown = true;
         }
 
-        internal bool RemoteCertRequired
-        {
-            get
-            {
-                return false;
-            }
-        }
-
-        private bool HandshakeCompleted => default;
+        internal bool RemoteCertRequired => false;
     }
 }
