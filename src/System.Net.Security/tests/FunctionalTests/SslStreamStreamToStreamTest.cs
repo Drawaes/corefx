@@ -366,9 +366,8 @@ namespace System.Net.Security.Tests
                 }
                 else
                 {
-                    await serverReadTask;
-                    //IOException serverException = await Assert.ThrowsAsync<IOException>(() => serverReadTask);
-                    //Assert.IsType<ObjectDisposedException>(serverException.InnerException);
+                    IOException serverException = await Assert.ThrowsAsync<IOException>(() => serverReadTask);
+                    Assert.IsType<ObjectDisposedException>(serverException.InnerException);
                 }
 
                 await Assert.ThrowsAsync<ObjectDisposedException>(() => serverSslStream.ReadAsync(serverBuffer, 0, serverBuffer.Length));
