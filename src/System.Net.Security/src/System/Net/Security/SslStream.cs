@@ -725,7 +725,7 @@ namespace System.Net.Security
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            CheckThrow(true);
+            CheckThrow(authSuccessCheck: true, shutdownCheck: true);
             ValidateParameters(buffer, offset, count);
 
             SslWriteSync writeAdapter = new SslWriteSync(this);
@@ -742,7 +742,7 @@ namespace System.Net.Security
 
         public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback asyncCallback, object asyncState)
         {
-            CheckThrow(true);
+            CheckThrow(authSuccessCheck: true, shutdownCheck: true);
             return TaskToApm.Begin(WriteAsync(buffer, offset, count, CancellationToken.None), asyncCallback, asyncState);
         }
 
@@ -760,7 +760,7 @@ namespace System.Net.Security
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
         {
-            CheckThrow(true);
+            CheckThrow(authSuccessCheck: true, shutdownCheck: true);
             SslWriteAsync writeAdapter = new SslWriteAsync(this, cancellationToken);
             return WriteAsyncInternal(writeAdapter, buffer);
         }

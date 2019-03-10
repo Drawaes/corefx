@@ -188,6 +188,11 @@ namespace System.Net.Security
             }
         }
 
+        ~SslStream()
+        {
+            Dispose(false);
+        }
+
         private SecurityStatusPal PrivateDecryptData(byte[] buffer, ref int offset, ref int count) => _context.Decrypt(buffer, ref offset, ref count);
 
         //
@@ -1785,8 +1790,6 @@ namespace System.Net.Security
         private ValueTask WriteAsyncInternal<TWriteAdapter>(TWriteAdapter writeAdapter, ReadOnlyMemory<byte> buffer)
             where TWriteAdapter : struct, ISslWriteAdapter
         {
-            CheckThrow(authSuccessCheck: true, shutdownCheck: true);
-
             if (buffer.Length == 0 && !SslStreamPal.CanEncryptEmptyMessage)
             {
                 // If it's an empty message and the PAL doesn't support that, we're done.
