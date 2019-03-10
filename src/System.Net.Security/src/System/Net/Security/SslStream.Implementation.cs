@@ -60,7 +60,7 @@ namespace System.Net.Security
         /// <summary>Set as the _exception when the instance is disposed.</summary>
         private static readonly ExceptionDispatchInfo s_disposedSentinel = ExceptionDispatchInfo.Capture(new ObjectDisposedException(nameof(SslStream)));
 
-        private SecureChannel SyncObject => _context;
+        private object SyncObject = new object();
 
         private void ThrowIfExceptional()
         {
